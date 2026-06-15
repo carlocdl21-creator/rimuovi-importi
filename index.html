@@ -3,118 +3,241 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strumenti PDF</title>
+<title>ARTEDILE Automatized — Strumenti PDF</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Barlow:wght@200;300;400;500;600&family=Barlow+Condensed:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0f172a; --card:#1e293b; --accent:#38bdf8; --accent2:#0ea5e9;
-    --ok:#22c55e; --text:#e2e8f0; --muted:#94a3b8; --border:#334155;
+    --bg-base:#f8fafc; --bg-soft:#eef3f9; --bg-card:#ffffff;
+    --blue:#1A4B8C; --blue-mid:#2563B0; --blue-light:#4A90D9; --blue-deep:#0d2545;
+    --sky:#6FA1D8; --sky-pale:#D6E8F9;
+    --text:#0d2545; --text-mid:#3a4858; --text-soft:#5a6a7a; --text-faint:#93a3b5;
+    --line:rgba(26,75,140,0.12); --line-strong:rgba(26,75,140,0.28);
+    --accent:#2980B9; --gold:#c9a96a;
+    --ok:#1f7a4d; --err:#b3261e;
+    --font-display:'Cormorant Garamond',serif;
+    --font-body:'Barlow',sans-serif;
+    --font-cond:'Barlow Condensed',sans-serif;
+    --font-mono:'Space Mono',monospace;
   }
   *{box-sizing:border-box}
+  html,body{margin:0}
   body{
-    margin:0; min-height:100vh; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-    background:linear-gradient(160deg,#0f172a,#1e293b); color:var(--text);
-    display:flex; align-items:flex-start; justify-content:center; padding:32px 24px;
+    font-family:var(--font-body); color:var(--text); min-height:100vh;
+    background:
+      radial-gradient(1200px 500px at 80% -10%, var(--sky-pale) 0%, rgba(214,232,249,0) 60%),
+      linear-gradient(180deg, var(--bg-base) 0%, var(--bg-soft) 100%);
+    background-attachment:fixed;
   }
-  .wrap{width:100%; max-width:580px}
-  .tabs{display:flex; gap:8px; margin-bottom:18px}
+  /* trama blueprint leggerissima */
+  body::before{
+    content:''; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.5;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:46px 46px;
+    -webkit-mask-image:radial-gradient(circle at 50% 30%, #000 0%, transparent 75%);
+            mask-image:radial-gradient(circle at 50% 30%, #000 0%, transparent 75%);
+  }
+
+  /* ───────── NAVBAR ───────── */
+  nav{
+    position:fixed; top:0; left:0; right:0; z-index:100;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:1.4rem 4vw;
+    background:linear-gradient(180deg, rgba(248,250,252,0.96) 0%, rgba(248,250,252,0.72) 70%, rgba(248,250,252,0) 100%);
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+  }
+  .nav-logo{display:flex; align-items:center; gap:.85rem; text-decoration:none}
+  .nav-logo-mark{width:30px; height:30px; transform-style:preserve-3d; animation:spin 22s linear infinite}
+  .nav-logo-mark svg{width:100%; height:100%; display:block}
+  @keyframes spin{to{transform:rotateY(360deg)}}
+  .nav-logo-text{
+    font-family:var(--font-display); font-size:1.18rem; font-weight:700;
+    letter-spacing:.34em; color:var(--blue); text-transform:uppercase; line-height:1;
+  }
+  .nav-logo-text em{font-style:normal; color:var(--blue-light); font-weight:400}
+  .nav-tag{
+    font-family:var(--font-cond); font-size:.68rem; font-weight:500; letter-spacing:.32em;
+    text-transform:uppercase; color:var(--text-faint);
+  }
+
+  /* ───────── LAYOUT ───────── */
+  .page{position:relative; z-index:1; min-height:100vh; display:flex; flex-direction:column;
+        align-items:center; padding:8.5rem 6vw 4rem;}
+  .intro{text-align:center; max-width:640px; margin-bottom:2.4rem}
+  .eyebrow{
+    font-family:var(--font-cond); font-size:.74rem; font-weight:600; letter-spacing:.42em;
+    text-transform:uppercase; color:var(--accent); margin-bottom:1rem;
+    display:flex; align-items:center; justify-content:center; gap:.9rem;
+  }
+  .eyebrow::before,.eyebrow::after{content:''; width:34px; height:1px; background:var(--line-strong)}
+  h1.title{
+    font-family:var(--font-display); font-weight:600; color:var(--blue-deep);
+    font-size:clamp(2.4rem,6vw,3.6rem); line-height:1.05; margin:0 0 .6rem;
+  }
+  h1.title em{font-style:italic; color:var(--blue-light)}
+  .lead{font-weight:300; font-size:1.02rem; color:var(--text-soft); line-height:1.6; margin:0}
+  .gold-rule{width:54px; height:2px; background:var(--gold); margin:1.5rem auto 0; opacity:.8}
+
+  /* ───────── TABS + CARD ───────── */
+  .wrap{width:100%; max-width:600px}
+  .tabs{display:flex; gap:0; margin-bottom:-1px; position:relative; z-index:2}
   .tab{
-    flex:1; padding:12px 10px; text-align:center; border-radius:12px 12px 0 0; cursor:pointer;
-    background:#15212f; border:1px solid var(--border); border-bottom:none; color:var(--muted);
-    font-weight:600; font-size:14px; transition:.15s;
+    flex:1; padding:1rem .8rem; text-align:center; cursor:pointer;
+    font-family:var(--font-cond); font-size:.82rem; font-weight:600; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--text-soft);
+    background:var(--bg-soft); border:1px solid var(--line); border-bottom:none;
+    border-radius:10px 10px 0 0; transition:.25s;
   }
-  .tab.active{background:var(--card); color:var(--accent); box-shadow:0 -2px 0 var(--accent) inset}
+  .tab:first-child{margin-right:6px}
+  .tab.active{background:var(--bg-card); color:var(--blue); box-shadow:0 -3px 0 var(--blue) inset}
+  .tab:hover:not(.active){color:var(--blue)}
+
   .card{
-    width:100%; background:var(--card); border:1px solid var(--border);
-    border-radius:0 0 18px 18px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,.4);
+    width:100%; background:var(--bg-card); border:1px solid var(--line);
+    border-radius:0 14px 14px 14px; padding:2.2rem;
+    box-shadow:0 30px 70px rgba(13,37,69,.10), 0 2px 8px rgba(13,37,69,.04);
   }
   .panel{display:none}
-  .panel.active{display:block}
-  h1{font-size:21px; margin:0 0 4px}
-  p.sub{color:var(--muted); margin:0 0 22px; font-size:14px; line-height:1.5}
+  .panel.active{display:block; animation:fade .35s ease}
+  @keyframes fade{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
+
+  .panel h2{
+    font-family:var(--font-display); font-weight:600; color:var(--blue-deep);
+    font-size:1.7rem; margin:0 0 .35rem;
+  }
+  .panel .sub{color:var(--text-soft); font-weight:300; font-size:.96rem; line-height:1.55; margin:0 0 1.5rem}
+  .panel .sub b{color:var(--text-mid); font-weight:500}
+  .panel .sub code{font-family:var(--font-mono); font-size:.82em; color:var(--accent); background:var(--sky-pale); padding:.1em .4em; border-radius:4px}
+
   .drop{
-    border:2px dashed var(--border); border-radius:14px; padding:42px 20px; text-align:center;
-    cursor:pointer; transition:.18s; background:rgba(56,189,248,.03);
+    border:1.5px dashed var(--line-strong); border-radius:12px; padding:2.6rem 1.2rem; text-align:center;
+    cursor:pointer; transition:.2s; background:linear-gradient(180deg, rgba(214,232,249,.18), rgba(214,232,249,.05));
   }
-  .drop.hover{border-color:var(--accent); background:rgba(56,189,248,.10); transform:scale(1.01)}
-  .drop .icon{font-size:42px; margin-bottom:10px}
-  .drop .big{font-size:16px; font-weight:600}
-  .drop .small{color:var(--muted); font-size:13px; margin-top:6px}
+  .drop.hover{border-color:var(--blue-light); background:var(--sky-pale); transform:translateY(-1px)}
+  .drop .icon{font-size:2.4rem; margin-bottom:.6rem; opacity:.9}
+  .drop .big{font-family:var(--font-cond); font-size:1.05rem; font-weight:600; letter-spacing:.04em; color:var(--blue-deep); text-transform:uppercase}
+  .drop .small{color:var(--text-faint); font-size:.85rem; margin-top:.35rem}
   input[type=file]{display:none}
-  .row{display:flex; gap:10px; margin-top:12px}
-  .row a{flex:1; text-align:center; font-size:13px; color:var(--accent); cursor:pointer; text-decoration:underline}
-  .status{margin-top:20px; font-size:14px; min-height:22px; text-align:center}
-  .bar{height:8px; background:#0b1220; border-radius:99px; overflow:hidden; margin-top:14px; display:none}
-  .bar > div{height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .2s}
-  button{
-    width:100%; margin-top:20px; padding:15px; border:0; border-radius:12px; font-size:16px;
-    font-weight:700; cursor:pointer; color:#04222e; background:linear-gradient(90deg,var(--accent),var(--accent2));
-    transition:.15s; display:none;
+
+  .row{display:flex; gap:.8rem; margin-top:.9rem}
+  .row a{
+    flex:1; text-align:center; cursor:pointer; padding:.7rem; border:1px solid var(--line);
+    border-radius:8px; font-family:var(--font-cond); font-size:.78rem; font-weight:500;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--accent); transition:.2s; background:var(--bg-base);
   }
-  button:hover{filter:brightness(1.07)}
-  button:active{transform:translateY(1px)}
-  .filelist{margin-top:16px; max-height:180px; overflow:auto; font-size:13px; border:1px solid var(--border); border-radius:10px; display:none}
-  .filelist div{padding:7px 12px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:10px}
+  .row a:hover{border-color:var(--blue-light); color:var(--blue); background:var(--sky-pale)}
+
+  .bar{height:6px; background:var(--bg-soft); border-radius:99px; overflow:hidden; margin-top:1.2rem; display:none; border:1px solid var(--line)}
+  .bar>div{height:100%; width:0; background:linear-gradient(90deg,var(--blue),var(--blue-light)); transition:width .2s}
+  .status{margin-top:1.1rem; font-size:.92rem; min-height:20px; text-align:center; color:var(--text-mid)}
+  .status.err{color:var(--err)} .status.done{color:var(--ok); font-weight:500}
+
+  button{
+    width:100%; margin-top:1.3rem; padding:1rem; border:1px solid var(--blue); border-radius:9px;
+    font-family:var(--font-cond); font-size:.92rem; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
+    cursor:pointer; color:#fff; background:var(--blue); transition:.25s; display:none;
+  }
+  button:hover{background:transparent; color:var(--blue)}
+
+  .filelist{margin-top:1.1rem; max-height:200px; overflow:auto; font-size:.86rem;
+            border:1px solid var(--line); border-radius:9px; display:none; background:var(--bg-base)}
+  .filelist div{padding:.55rem .9rem; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:.8rem}
   .filelist div:last-child{border-bottom:none}
-  .filelist .ko{color:#f87171}
-  .filelist .okk{color:var(--ok)}
-  .note{margin-top:18px; font-size:12px; color:var(--muted); line-height:1.5; text-align:center}
-  .err{color:#f87171}
-  .done{color:var(--ok)}
+  .filelist span:first-child{color:var(--text-mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .filelist .okk{color:var(--ok); font-weight:500; white-space:nowrap} .filelist .ko{color:var(--err); white-space:nowrap}
+
+  .foot{margin-top:1.8rem; font-size:.8rem; color:var(--text-faint); text-align:center; font-weight:300; line-height:1.5}
+  .foot .lock{color:var(--gold)}
+
+  @media(max-width:560px){
+    .nav-logo-text{font-size:1rem; letter-spacing:.24em} .nav-tag{display:none}
+    .page{padding-top:7rem} .card{padding:1.5rem}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="tabs">
-    <div class="tab active" data-tab="importi">🧾 Rimuovi Importi</div>
-    <div class="tab" data-tab="p7m">🔓 Converter p7m → PDF</div>
+
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-mark">
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 4 L28 26 L4 26 Z" fill="none" stroke="#1A4B8C" stroke-width="1.5"/>
+        <path d="M16 4 L22 16 L16 16 Z" fill="#4A90D9" opacity="0.85"/>
+        <path d="M16 16 L22 16 L28 26 L16 26 Z" fill="#1A4B8C" opacity="0.6"/>
+      </svg>
+    </div>
+    <div>
+      <div class="nav-logo-text">Arte<em>dile</em></div>
+      <div class="nav-tag">Automatized</div>
+    </div>
+  </a>
+</nav>
+
+<div class="page">
+  <div class="intro">
+    <div class="eyebrow">Strumenti interni</div>
+    <h1 class="title">Strumenti <em>PDF</em></h1>
+    <p class="lead">Una piccola suite per lavorare i documenti di cantiere direttamente nel browser —
+       nessun programma da installare, nessun file caricato online.</p>
+    <div class="gold-rule"></div>
   </div>
-  <div class="card">
 
-    <!-- ========== PANNELLO 1: RIMUOVI IMPORTI ========== -->
-    <section class="panel active" id="panel-importi">
-      <h1>🧾 Rimuovi Importi</h1>
-      <p class="sub">Carica un Computo Metrico Estimativo in PDF (formato PriMus/ACCA).
-         Cancella i valori della colonna <b>IMPORTI</b> (unitario e TOTALE) e ti restituisce
-         lo stesso PDF, senza prezzi.</p>
+  <div class="wrap">
+    <div class="tabs">
+      <div class="tab active" data-tab="importi">Rimuovi Importi</div>
+      <div class="tab" data-tab="p7m">Converter p7m → PDF</div>
+    </div>
+    <div class="card">
 
-      <div class="drop" id="drop1">
-        <div class="icon">📄</div>
-        <div class="big">Trascina qui il PDF</div>
-        <div class="small">oppure clicca per selezionarlo</div>
-      </div>
-      <input type="file" id="file1" accept="application/pdf,.pdf">
+      <!-- ========== PANNELLO 1: RIMUOVI IMPORTI ========== -->
+      <section class="panel active" id="panel-importi">
+        <h2>Rimuovi Importi</h2>
+        <p class="sub">Carica un Computo Metrico Estimativo in PDF (formato PriMus/ACCA).
+           Cancella i valori della colonna <b>IMPORTI</b> (unitario e TOTALE) e ti restituisce
+           lo stesso PDF, senza prezzi.</p>
 
-      <div class="bar"><div id="bar1"></div></div>
-      <div class="status" id="status1"></div>
-      <button id="dl1">⬇️ Scarica PDF senza importi</button>
-    </section>
+        <div class="drop" id="drop1">
+          <div class="icon">📄</div>
+          <div class="big">Trascina qui il PDF</div>
+          <div class="small">oppure clicca per selezionarlo</div>
+        </div>
+        <input type="file" id="file1" accept="application/pdf,.pdf">
 
-    <!-- ========== PANNELLO 2: CONVERTER P7M ========== -->
-    <section class="panel" id="panel-p7m">
-      <h1>🔓 Converter p7m → PDF</h1>
-      <p class="sub">Carica uno o più file <b>.p7m</b> (PDF firmati digitalmente, anche
-         doppia firma <code>.pdf.p7m.p7m</code>) oppure un'intera cartella.
-         Estrae i PDF e te li restituisce tutti in un unico file ZIP.</p>
+        <div class="bar"><div id="bar1"></div></div>
+        <div class="status" id="status1"></div>
+        <button id="dl1">Scarica PDF senza importi</button>
+      </section>
 
-      <div class="drop" id="drop2">
-        <div class="icon">🗂️</div>
-        <div class="big">Trascina qui i file .p7m</div>
-        <div class="small">o una cartella intera</div>
-      </div>
-      <input type="file" id="file2" accept=".p7m" multiple>
-      <input type="file" id="folder2" webkitdirectory directory multiple>
-      <div class="row">
-        <a id="pickFiles">📑 Scegli file</a>
-        <a id="pickFolder">📁 Scegli cartella</a>
-      </div>
+      <!-- ========== PANNELLO 2: CONVERTER P7M ========== -->
+      <section class="panel" id="panel-p7m">
+        <h2>Converter p7m → PDF</h2>
+        <p class="sub">Carica uno o più file <b>.p7m</b> (PDF firmati digitalmente, anche
+           doppia firma <code>.pdf.p7m.p7m</code>) oppure un'intera cartella.
+           Estrae i PDF e te li restituisce tutti in un unico file ZIP.</p>
 
-      <div class="bar"><div id="bar2"></div></div>
-      <div class="status" id="status2"></div>
-      <div class="filelist" id="list2"></div>
-      <button id="dl2">⬇️ Scarica tutti i PDF (ZIP)</button>
-    </section>
+        <div class="drop" id="drop2">
+          <div class="icon">🗂️</div>
+          <div class="big">Trascina qui i file .p7m</div>
+          <div class="small">o una cartella intera</div>
+        </div>
+        <input type="file" id="file2" accept=".p7m" multiple>
+        <input type="file" id="folder2" webkitdirectory directory multiple>
+        <div class="row">
+          <a id="pickFiles">Scegli file</a>
+          <a id="pickFolder">Scegli cartella</a>
+        </div>
 
-    <div class="note">Tutto avviene sul tuo computer: i file non vengono caricati su nessun server.</div>
+        <div class="bar"><div id="bar2"></div></div>
+        <div class="status" id="status2"></div>
+        <div class="filelist" id="list2"></div>
+        <button id="dl2">Scarica tutti i PDF (ZIP)</button>
+      </section>
+    </div>
+
+    <div class="foot"><span class="lock">🔒</span> Tutto avviene sul tuo computer: i file non vengono caricati su nessun server.</div>
   </div>
 </div>
 
@@ -306,12 +429,12 @@ async function handleP7m(files){
 
   if (ok === 1){
     // un solo file: scarico direttamente il PDF
-    dl2.textContent = '⬇️ Scarica il PDF';
+    dl2.textContent = 'Scarica il PDF';
     set2(`✓ Estratto 1 PDF${ko?` (${ko} non riusciti)`:''}.`, 'done');
   } else {
     set2('Creazione ZIP…');
     zipBytes = await zip.generateAsync({ type:'uint8array' });
-    dl2.textContent = `⬇️ Scarica tutti i PDF (ZIP, ${ok} file)`;
+    dl2.textContent = `Scarica tutti i PDF (ZIP, ${ok} file)`;
     set2(`✓ Estratti ${ok} PDF${ko?` (${ko} non riusciti)`:''}.`, 'done');
   }
   dl2.style.display = 'block';
