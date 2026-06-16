@@ -613,6 +613,26 @@ async function linesFromPdf(buf, skipFirst, prog){
   return all;
 }
 
+// rilevazione colonne "rilassata" per le foto: ancora sulle intestazioni GRANDI
+// (DESIGNAZIONE / Quantità / Num.Ord / TOTALE) che l'OCR legge meglio dei sotto-titoli
+let imgColModel = null;
+function detectColsLoose(W){
+  const C = it => it.x + it.w/2;
+  const find = re => { const m = W.filter(it => re.test((it.s||'').toLowerCase().replace(/\s+/g,''))); return m.length ? C(m.sort((a,b)=>a.y-b.y)[0]) : null; };
+  const no=find(/^num\.?ord/), q=find(/quantit/), de=find(/designazione/), tot=find(/^totale$/);
+  const REF={parug:317,lung:351,larg:387,hpeso:426,quant:467,unit:509,tot:560,numMax:52,desEnd:300,des:175,no:28};
+  let A=null;
+  if (q!=null && de!=null) A=[[REF.des,de],[REF.quant,q]];
+  else if (q!=null && no!=null) A=[[REF.no,no],[REF.quant,q]];
+  else if (de!=null && tot!=null) A=[[REF.des,de],[REF.tot,tot]];
+  else if (no!=null && tot!=null) A=[[REF.no,no],[REF.tot,tot]];
+  if (!A) return null;
+  const [[r1,i1],[r2,i2]]=A; if (Math.abs(i2-i1)<1) return null;
+  const map = xr => i1 + (xr-r1)*(i2-i1)/(r2-r1);
+  const cc={}; NUMCOLS.forEach(k => cc[k]=map(REF[k]));
+  return { c:cc, numMax:map(REF.numMax), numericLeft:map(REF.desEnd) };
+}
+
 async function linesFromImage(file, prog){
   if (!window.Tesseract){
     await new Promise((res,rej)=>{ const s=document.createElement('script');
@@ -622,13 +642,14 @@ async function linesFromImage(file, prog){
   const url = URL.createObjectURL(file);
   const { data } = await Tesseract.recognize(url, 'ita', { logger:m=>{ if(m.status==='recognizing text') prog(m.progress); } });
   URL.revokeObjectURL(url);
-  const words = (data.words||[]).filter(w=>w.text && w.text.trim()).map(w=>({
-    s:w.text, x:w.bbox.x0, y:w.bbox.y0, w:w.bbox.x1-w.bbox.x0, h:w.bbox.y1-w.bbox.y0
+  const all = (data.words||[]).filter(w=>w.text && w.text.trim()).map(w=>({
+    s:w.text, c:w.confidence, x:w.bbox.x0, y:w.bbox.y0, w:w.bbox.x1-w.bbox.x0, h:w.bbox.y1-w.bbox.y0
   }));
-  const H = data.height || (words.length? Math.max(...words.map(w=>w.y+w.h)) : 1000);
-  const M = detectCols(words, H);
+  const W = all.filter(w => w.c >= 40);          // togli il rumore a bassa confidenza
+  const M = detectColsLoose(W) || imgColModel;   // riusa il modello tra pagine
+  if (M) imgColModel = M;
   if (!M) return null;
-  return groupLines(words).map(ln => lineToCells(ln, M));
+  return groupLines(W).map(ln => lineToCells(ln, M));
 }
 
 async function handleComputo(files){
@@ -639,6 +660,8 @@ async function handleComputo(files){
   const skip = skipFirst3.checked;
   const pdfs = files.filter(f => /\.pdf$/i.test(f.name) || f.type==='application/pdf');
   const imgs = files.filter(f => !(/\.pdf$/i.test(f.name) || f.type==='application/pdf'));
+  const srcImages = !pdfs.length && imgs.length;
+  imgColModel = null;
   let lines = [];
   try {
     if (pdfs.length){
@@ -664,11 +687,20 @@ async function handleComputo(files){
   set3('Ricostruzione tabella…'); prog3(0.9);
   const rows = buildRows(lines);
   const items = rows.filter(r=>r.type==='item').length;
-  if (!rows.length || items===0){ set3('Non sono riuscito a riconoscere la tabella del computo. Con le foto i risultati possono variare: prova col PDF.', 'err'); return; }
+  const hasData = rows.some(r => NUMCOLS.some(k=>r[k]!=null)) || items>0;
+  if (!rows.length || !hasData){
+    set3(srcImages
+      ? 'Lettura da foto non riuscita: l\'immagine è poco leggibile. Per un risultato certo usa il PDF, oppure una scansione piana e dritta (app scanner).'
+      : 'Non sono riuscito a riconoscere la tabella del computo. Prova col PDF.', 'err');
+    return;
+  }
 
   xlsxBytes = await makeXlsx(rows);
   prog3(1);
-  set3(`✓ Fatto! ${items} voci di lavoro, ${rows.length} righe.`, 'done');
+  if (srcImages)
+    set3(`✓ Estratte ${items} voci, ${rows.length} righe — lettura da foto, da verificare a mano. Per risultati certi usa il PDF.`, 'done');
+  else
+    set3(`✓ Fatto! ${items} voci di lavoro, ${rows.length} righe.`, 'done');
   dl3.style.display='block';
 }
 
