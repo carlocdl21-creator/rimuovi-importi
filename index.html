@@ -192,6 +192,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="importi"><span class="tico">🧾</span> Rimuovi Importi</div>
       <div class="tab" data-tab="p7m"><span class="tico">🔓</span> File Converter</div>
+      <div class="tab" data-tab="xlsx"><span class="tico">📊</span> Computo in XLSX</div>
     </div>
     <div class="card">
 
@@ -238,6 +239,31 @@
         <div class="filelist" id="list2"></div>
         <button id="dl2">Scarica tutti i PDF (ZIP)</button>
       </section>
+
+      <!-- ========== PANNELLO 3: COMPUTO IN XLSX ========== -->
+      <section class="panel" id="panel-xlsx">
+        <h2>Computo in XLSX</h2>
+        <p class="sub">Carica un <b>PDF</b> del Computo Metrico (formato PriMus/ACCA) e lo trasforma
+           in un foglio <b>Excel</b> riga per riga, con tutte le colonne. Sono supportate anche le
+           <b>immagini/foto</b> (OCR, sperimentale). La prima pagina (copertina) viene esclusa.</p>
+
+        <div class="drop" id="drop3">
+          <div class="icon">📊</div>
+          <div class="big">Trascina qui il PDF o le immagini</div>
+          <div class="small">oppure clicca per selezionarli</div>
+        </div>
+        <input type="file" id="file3" accept="application/pdf,.pdf,image/*" multiple>
+
+        <label style="display:flex;align-items:center;gap:.5rem;margin-top:.9rem;font-size:.85rem;color:var(--text-soft);cursor:pointer">
+          <input type="checkbox" id="skipFirst3" checked style="display:inline-block;width:auto;margin:0">
+          Escludi la prima pagina (copertina)
+        </label>
+
+        <div class="bar"><div id="bar3"></div></div>
+        <div class="status" id="status3"></div>
+        <div class="filelist" id="list3"></div>
+        <button id="dl3">Scarica Excel (.xlsx)</button>
+      </section>
     </div>
 
     <div class="foot"><span class="lock">🔒</span> Tutto avviene sul tuo computer: i file non vengono caricati su nessun server.</div>
@@ -248,6 +274,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script>
 /* ---------- tab switching ---------- */
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
@@ -447,6 +474,232 @@ dl2.addEventListener('click', () => {
   if (zipBytes) download(zipBytes, 'documenti_pdf.zip', 'application/zip');
   else if (singlePdf) download(singlePdf, singleName, 'application/pdf');
 });
+
+/* =====================================================================
+   PANNELLO 3 — COMPUTO IN XLSX
+   ===================================================================== */
+const drop3 = document.getElementById('drop3'), file3 = document.getElementById('file3');
+const status3 = document.getElementById('status3'), dl3 = document.getElementById('dl3');
+const list3 = document.getElementById('list3'), skipFirst3 = document.getElementById('skipFirst3');
+const bar3wrap = document.getElementById('panel-xlsx').querySelector('.bar'), bar3 = document.getElementById('bar3');
+let xlsxBytes = null, xlsxName = 'computo.xlsx';
+
+drop3.addEventListener('click', () => file3.click());
+file3.addEventListener('change', e => handleComputo([...e.target.files]));
+wireDrop(drop3, files => handleComputo(files));
+
+function set3(msg, cls){ status3.className = 'status ' + (cls||''); status3.textContent = msg; }
+function prog3(p){ bar3wrap.style.display='block'; bar3.style.width = Math.round(p*100)+'%'; }
+
+const NUMCOLS = ['parug','lung','larg','hpeso','quant','unit','tot'];
+// riferimento geometrico template PriMus (PDF 595pt): centri colonne
+const REF = {parug:317, lung:351, larg:387, hpeso:426, quant:467, unit:509, tot:560, desMin:52, numMax:52, desEnd:300};
+
+function parseNum(s){
+  if(!s) return null;
+  s = s.replace(/[^0-9.,´'’]/g,'').trim();
+  if(!/\d/.test(s)) return null;
+  s = s.replace(/[´'’]/g,'').replace(/\.(?=\d{3}(\D|$))/g,'');
+  s = s.replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+const SKIP_DES = /^(riporto|a\s*riportare|dimensioni|importi|designazione( dei lavori)?|num\.?\s*ord\.?|tariffa|pag\b.*|primus.*|par\.ug.*|lung\.?|larg\.?|h\/?peso|quantit.*|unitario|totale)$/i;
+
+// individua i centri-colonna dall'intestazione (cerca i sotto-titoli)
+function detectCols(items, H){
+  const top = items.filter(it => it.y < H*0.18);
+  const C = it => it.x + it.w/2;
+  const f = re => { const m = top.filter(it => re.test(it.s.toLowerCase().replace(/\s+/g,''))); return m.length ? C(m.sort((a,b)=>a.y-b.y)[0]) : null; };
+  const c = { parug:f(/^par\.?ug/), lung:f(/^lung\.?$/), larg:f(/^larg\.?$/),
+              hpeso:f(/h?\/?peso/), quant:f(/^quantit/), unit:f(/^unitario$/), tot:f(/^totale$/) };
+  if (Object.values(c).filter(v=>v!=null).length < 4) return null;
+  // scala rispetto al riferimento (anchor su quant)
+  const anchorImg = c.quant!=null ? c.quant : c.parug;
+  const anchorRef = c.quant!=null ? REF.quant : REF.parug;
+  let span=1;
+  if (c.parug!=null && c.tot!=null) span = (c.tot-c.parug)/(REF.tot-REF.parug);
+  else if (c.parug!=null && c.quant!=null) span = (c.quant-c.parug)/(REF.quant-REF.parug);
+  const map = xref => anchorImg + (xref-anchorRef)*span;
+  const cc = {}; NUMCOLS.forEach(k => cc[k] = c[k]!=null ? c[k] : map(REF[k]));
+  return { c:cc, numMax:map(REF.numMax), numericLeft:map(REF.desEnd) };
+}
+
+function assign(it, M){
+  const cx = it.x + it.w/2;
+  if (cx < M.numMax) return 'numOrd';
+  if (cx < M.numericLeft) return 'des';
+  let best='quant', bd=1e9;
+  for (const k of NUMCOLS){ const d=Math.abs(cx-M.c[k]); if(d<bd){bd=d;best=k;} }
+  return best;
+}
+
+function groupLines(items){
+  items.sort((a,b)=> a.y-b.y || a.x-b.x);
+  const lines=[]; let cur=null;
+  for (const it of items){
+    if(!cur || Math.abs(it.y-cur.y) > Math.max(4, it.h*0.6)){ cur={y:it.y, items:[it]}; lines.push(cur); }
+    else cur.items.push(it);
+  }
+  return lines;
+}
+
+function lineToCells(line, M){
+  const b={numOrd:[],des:[],parug:[],lung:[],larg:[],hpeso:[],quant:[],unit:[],tot:[]};
+  for (const it of line.items) b[assign(it,M)].push(it);
+  const J = arr => arr.sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').replace(/\s+/g,' ').trim();
+  return {
+    numOrd:J(b.numOrd), des:J(b.des),
+    parug:parseNum(J(b.parug)), lung:parseNum(J(b.lung)), larg:parseNum(J(b.larg)),
+    hpeso:parseNum(J(b.hpeso)), quant:parseNum(J(b.quant)), unit:parseNum(J(b.unit)), tot:parseNum(J(b.tot))
+  };
+}
+
+// trasforma le righe-testo in righe logiche (voce + sotto-righe), unendo le descrizioni
+function buildRows(allLines){
+  const out=[]; let cur=null; let nextNum=1;
+  for (const L of allLines){
+    const hasNum = NUMCOLS.some(k=>L[k]!=null);
+    const des = L.des.trim();
+    const desL = des.toLowerCase();
+    const desNoSp = desL.replace(/\s+/g,'');
+    const numOrd = L.numOrd.trim();
+    const lead = numOrd.match(/^(\d+)/);
+    const leadN = lead ? parseInt(lead[1],10) : null;
+    // una nuova VOCE inizia solo se il numero d'ordine segue la sequenza (1,2,3,...)
+    const itemStart = leadN!=null && leadN===nextNum;
+    // scarta intestazioni/segnaposto ripetuti (RIPORTO, DIMENSIONI, header colonne, pag., ...)
+    if (!itemStart && (SKIP_DES.test(desNoSp) || SKIP_DES.test(desL))) continue;
+    if (!itemStart && !hasNum && !des) continue;
+    const isTariffa = !itemStart && /[A-Za-z]/.test(numOrd) && /\d/.test(numOrd) && numOrd.length<16;
+    const isSommano = /^sommano/i.test(desL);
+    const isParziale = /^(parziale|t\s*o\s*t\s*a\s*l\s*e)\b/i.test(desL);
+    if (itemStart){
+      nextNum++;
+      const rest = numOrd.replace(/^\d+\s*/,'').trim();
+      cur = { type:'item', numOrd:String(leadN), tariffa:rest, des:des, parug:L.parug,lung:L.lung,larg:L.larg,hpeso:L.hpeso,quant:L.quant,unit:L.unit,tot:L.tot };
+      out.push(cur);
+      continue;
+    }
+    if (isTariffa && cur) cur.tariffa = (cur.tariffa ? cur.tariffa+' ' : '') + numOrd;
+    if (isSommano || isParziale){
+      out.push({ type:'sum', numOrd:'', tariffa:'', des:des, parug:L.parug,lung:L.lung,larg:L.larg,hpeso:L.hpeso,quant:L.quant,unit:L.unit,tot:L.tot });
+    } else if (hasNum){
+      out.push({ type:'meas', numOrd:'', tariffa:'', des:des, parug:L.parug,lung:L.lung,larg:L.larg,hpeso:L.hpeso,quant:L.quant,unit:L.unit,tot:L.tot });
+    } else if (des){
+      if (cur) cur.des += ' ' + des;           // continuazione descrizione
+      else out.push({ type:'sec', numOrd:'', tariffa:'', des:des });
+    }
+  }
+  return out;
+}
+
+async function linesFromPdf(buf, skipFirst, prog){
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const n = doc.numPages; let M=null; const all=[];
+  for (let i=1;i<=n;i++){
+    if (skipFirst && i===1){ prog(i/n*0.8); continue; }
+    const page = await doc.getPage(i);
+    const H = page.getViewport({scale:1}).height;
+    let items = (await page.getTextContent()).items
+      .filter(it => it.str && it.str.trim())
+      .map(it => ({ s:it.str, x:it.transform[4], y:H-it.transform[5], w:it.width, h:it.height||8 }))
+      .filter(it => it.y > 30 && it.y < H-26);   // togli numero pagina e footer
+    const dm = detectCols(items, H); if (dm) M=dm;
+    if (!M){ prog(i/n*0.8); continue; }
+    for (const ln of groupLines(items)) all.push(lineToCells(ln, M));
+    prog(i/n*0.8);
+  }
+  return all;
+}
+
+async function linesFromImage(file, prog){
+  if (!window.Tesseract){
+    await new Promise((res,rej)=>{ const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js';
+      s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+  }
+  const url = URL.createObjectURL(file);
+  const { data } = await Tesseract.recognize(url, 'ita', { logger:m=>{ if(m.status==='recognizing text') prog(m.progress); } });
+  URL.revokeObjectURL(url);
+  const words = (data.words||[]).filter(w=>w.text && w.text.trim()).map(w=>({
+    s:w.text, x:w.bbox.x0, y:w.bbox.y0, w:w.bbox.x1-w.bbox.x0, h:w.bbox.y1-w.bbox.y0
+  }));
+  const H = data.height || (words.length? Math.max(...words.map(w=>w.y+w.h)) : 1000);
+  const M = detectCols(words, H);
+  if (!M) return null;
+  return groupLines(words).map(ln => lineToCells(ln, M));
+}
+
+async function handleComputo(files){
+  files = files.filter(f => /\.(pdf|png|jpe?g|webp|bmp|tiff?)$/i.test(f.name) || f.type==='application/pdf' || /^image\//.test(f.type));
+  if (!files.length){ set3('Carica un PDF o delle immagini.', 'err'); return; }
+  if (!window.ExcelJS){ set3('Libreria Excel non caricata: serve internet.', 'err'); return; }
+  dl3.style.display='none'; list3.style.display='none'; list3.innerHTML=''; xlsxBytes=null;
+  const skip = skipFirst3.checked;
+  const pdfs = files.filter(f => /\.pdf$/i.test(f.name) || f.type==='application/pdf');
+  const imgs = files.filter(f => !(/\.pdf$/i.test(f.name) || f.type==='application/pdf'));
+  let lines = [];
+  try {
+    if (pdfs.length){
+      set3('Lettura del PDF…'); prog3(0.05);
+      const buf = await pdfs[0].arrayBuffer();
+      lines = await linesFromPdf(buf, skip, p=>prog3(0.05+0.8*p));
+      xlsxName = pdfs[0].name.replace(/\.pdf$/i,'') + '.xlsx';
+    } else if (imgs.length){
+      imgs.sort((a,b)=>a.name.localeCompare(b.name));
+      const use = skip ? imgs.slice(1) : imgs;
+      if (!use.length){ set3('Solo la copertina presente: niente da convertire.', 'err'); return; }
+      let acc=[];
+      for (let i=0;i<use.length;i++){
+        set3(`OCR immagine ${i+1} di ${use.length}…`);
+        const r = await linesFromImage(use[i], p=>prog3((i+p)/use.length*0.85));
+        if (r) acc = acc.concat(r);
+      }
+      lines = acc;
+      xlsxName = 'computo.xlsx';
+    }
+  } catch(err){ console.error(err); set3('Errore in lettura: '+err.message, 'err'); return; }
+
+  set3('Ricostruzione tabella…'); prog3(0.9);
+  const rows = buildRows(lines);
+  const items = rows.filter(r=>r.type==='item').length;
+  if (!rows.length || items===0){ set3('Non sono riuscito a riconoscere la tabella del computo. Con le foto i risultati possono variare: prova col PDF.', 'err'); return; }
+
+  xlsxBytes = await makeXlsx(rows);
+  prog3(1);
+  set3(`✓ Fatto! ${items} voci di lavoro, ${rows.length} righe.`, 'done');
+  dl3.style.display='block';
+}
+
+async function makeXlsx(rows){
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Computo Metrico');
+  const blue='FF1A4B8C', light='FFD6E8F9', grey='FFEEF3F9';
+  const cols=[['Num.Ord.',9],['Tariffa',9],['Designazione dei lavori',75],['par.ug.',9],['lung.',9],['larg.',9],['H/peso',9],['Quantità',11],['Importo unitario',13],['Importo TOTALE',13]];
+  ws.columns = cols.map(c=>({width:c[1]}));
+  const hr = ws.addRow(cols.map(c=>c[0]));
+  hr.height=28;
+  hr.eachCell(c=>{ c.font={name:'Arial',bold:true,size:10,color:{argb:'FFFFFFFF'}}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:blue}}; c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=brd(); });
+  for (const r of rows){
+    const vals=[r.numOrd||'', r.tariffa||'', r.des||'', r.parug??'', r.lung??'', r.larg??'', r.hpeso??'', r.quant??'', r.unit??'', r.tot??''];
+    const row = ws.addRow(vals);
+    row.eachCell((c,i)=>{ c.border=brd(); c.font={name:'Arial',size:9};
+      if(i===3) c.alignment={horizontal:'left',vertical:'top',wrapText:true};
+      else if(i<=2) c.alignment={horizontal:'center',vertical:'top'};
+      else { c.alignment={horizontal:'right',vertical:'top'}; if(i>=4&&i<=7) c.numFmt='0.000'; else if(i>=8) c.numFmt='#,##0.00'; }
+    });
+    if (r.type==='item'){ row.eachCell(c=>c.font={name:'Arial',size:9,bold:true}); [1,2,3].forEach(i=>row.getCell(i).fill={type:'pattern',pattern:'solid',fgColor:{argb:light}}); }
+    else if (r.type==='sum'){ for(let i=3;i<=10;i++){ row.getCell(i).font={name:'Arial',size:9,bold:true}; row.getCell(i).fill={type:'pattern',pattern:'solid',fgColor:{argb:grey}}; } }
+    else if (r.type==='sec'){ row.eachCell(c=>{ c.font={name:'Arial',size:9,bold:true,italic:true,color:{argb:blue}}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:grey}}; }); }
+  }
+  ws.views=[{state:'frozen', ySplit:1}];
+  const buf = await wb.xlsx.writeBuffer();
+  return new Uint8Array(buf);
+}
+function brd(){ const s={style:'thin',color:{argb:'FFB7C4D4'}}; return {top:s,left:s,right:s,bottom:s}; }
+
+dl3.addEventListener('click', () => download(xlsxBytes, xlsxName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 
 /* ---------- download comune ---------- */
 function download(bytes, name, mime){
