@@ -243,9 +243,10 @@
       <!-- ========== PANNELLO 3: COMPUTO IN XLSX ========== -->
       <section class="panel" id="panel-xlsx">
         <h2>Computo in XLSX</h2>
-        <p class="sub">Carica un <b>PDF</b> del Computo Metrico (formato PriMus/ACCA) e lo trasforma
-           in un foglio <b>Excel</b> riga per riga, con tutte le colonne. Sono supportate anche le
-           <b>immagini/foto</b> (OCR, sperimentale). La prima pagina (copertina) viene esclusa.</p>
+        <p class="sub">Carica uno o più <b>PDF</b> del Computo Metrico (formato PriMus/ACCA) e li trasforma
+           in fogli <b>Excel</b> riga per riga, con tutte le colonne. Con più PDF ottieni un <b>ZIP</b> con
+           un Excel separato per ciascuno. Sono supportate anche le <b>immagini/foto</b> (OCR, sperimentale).
+           La prima pagina (copertina) viene esclusa.</p>
 
         <div class="drop" id="drop3">
           <div class="icon">📊</div>
@@ -528,7 +529,7 @@ const drop3 = document.getElementById('drop3'), file3 = document.getElementById(
 const status3 = document.getElementById('status3'), dl3 = document.getElementById('dl3');
 const list3 = document.getElementById('list3'), skipFirst3 = document.getElementById('skipFirst3');
 const bar3wrap = document.getElementById('panel-xlsx').querySelector('.bar'), bar3 = document.getElementById('bar3');
-let xlsxBytes = null, xlsxName = 'computo.xlsx';
+let xlsxBytes = null, xlsxName = 'computo.xlsx', xlsxZip = null;
 
 drop3.addEventListener('click', () => file3.click());
 file3.addEventListener('change', e => handleComputo([...e.target.files]));
@@ -700,54 +701,88 @@ async function linesFromImage(file, prog){
 
 async function handleComputo(files){
   files = files.filter(f => /\.(pdf|png|jpe?g|webp|bmp|tiff?)$/i.test(f.name) || f.type==='application/pdf' || /^image\//.test(f.type));
-  if (!files.length){ set3('Carica un PDF o delle immagini.', 'err'); return; }
+  if (!files.length){ set3('Carica uno o più PDF (o delle immagini).', 'err'); return; }
   if (!window.ExcelJS){ set3('Libreria Excel non caricata: serve internet.', 'err'); return; }
-  dl3.style.display='none'; list3.style.display='none'; list3.innerHTML=''; xlsxBytes=null;
+  dl3.style.display='none'; list3.style.display='none'; list3.innerHTML=''; xlsxBytes=null; xlsxZip=null;
   const skip = skipFirst3.checked;
   const pdfs = files.filter(f => /\.pdf$/i.test(f.name) || f.type==='application/pdf');
   const imgs = files.filter(f => !(/\.pdf$/i.test(f.name) || f.type==='application/pdf'));
-  const srcImages = !pdfs.length && imgs.length;
-  imgColModel = null;
-  let lines = [];
+
   try {
+    // ---- PDF: un Excel separato per ogni PDF (più PDF → ZIP) ----
     if (pdfs.length){
-      set3('Lettura del PDF…'); prog3(0.05);
-      const buf = await pdfs[0].arrayBuffer();
-      lines = await linesFromPdf(buf, skip, p=>prog3(0.05+0.8*p));
-      xlsxName = pdfs[0].name.replace(/\.pdf$/i,'') + '.xlsx';
-    } else if (imgs.length){
+      pdfs.sort((a,b)=>a.name.localeCompare(b.name));
+      if (pdfs.length>1) list3.style.display='block';
+      const results=[];                       // {name, bytes}
+      for (let i=0;i<pdfs.length;i++){
+        const f=pdfs[i];
+        set3(`Elaborazione ${i+1} di ${pdfs.length}: ${f.name}…`);
+        prog3(i/pdfs.length);
+        let bytes=null, items=0, errMsg=null;
+        try {
+          const buf=await f.arrayBuffer();
+          const lines=await linesFromPdf(buf, skip, p=>prog3((i+p*0.95)/pdfs.length));
+          const rows=buildRows(lines);
+          items=rows.filter(r=>r.type==='item').length;
+          const hasData=rows.some(r=>NUMCOLS.some(k=>r[k]!=null))||items>0;
+          if (rows.length && hasData) bytes=await makeXlsx(rows);
+          else errMsg='tabella non riconosciuta';
+        } catch(e){ errMsg=e.message; }
+        const outName=f.name.replace(/\.pdf$/i,'')+'.xlsx';
+        if (pdfs.length>1){
+          const row=document.createElement('div');
+          row.innerHTML = bytes
+            ? `<span>${outName}</span><span class="okk">✓ ${items} voci</span>`
+            : `<span>${f.name}</span><span class="ko">✗ ${errMsg||'non riuscito'}</span>`;
+          list3.appendChild(row);
+        }
+        if (bytes) results.push({name:outName, bytes});
+      }
+      prog3(1);
+      if (!results.length){ set3('Nessun Excel generato: tabella non riconosciuta nei PDF.', 'err'); return; }
+      if (results.length===1){
+        xlsxBytes=results[0].bytes; xlsxName=results[0].name;
+        dl3.textContent='Scarica Excel (.xlsx)';
+        set3('✓ Fatto! Excel generato.', 'done');
+      } else {
+        set3('Creazione ZIP…');
+        const zip=new JSZip();
+        for (const r of results) zip.file(r.name, r.bytes);
+        xlsxZip=await zip.generateAsync({type:'uint8array'});
+        const ko=pdfs.length-results.length;
+        dl3.textContent=`Scarica tutti gli Excel (ZIP, ${results.length} file)`;
+        set3(`✓ Fatto! ${results.length} Excel generati${ko?` (${ko} non riusciti)`:''}.`, 'done');
+      }
+      dl3.style.display='block';
+      return;
+    }
+
+    // ---- IMMAGINI: un singolo Excel best-effort (OCR) ----
+    if (imgs.length){
+      imgColModel=null;
       imgs.sort((a,b)=>a.name.localeCompare(b.name));
       const use = skip ? imgs.slice(1) : imgs;
       if (!use.length){ set3('Solo la copertina presente: niente da convertire.', 'err'); return; }
       let acc=[];
       for (let i=0;i<use.length;i++){
         set3(`OCR immagine ${i+1} di ${use.length}…`);
-        const r = await linesFromImage(use[i], p=>prog3((i+p)/use.length*0.85));
-        if (r) acc = acc.concat(r);
+        const r=await linesFromImage(use[i], p=>prog3((i+p)/use.length*0.9));
+        if (r) acc=acc.concat(r);
       }
-      lines = acc;
-      xlsxName = 'computo.xlsx';
+      const rows=buildRows(acc);
+      const items=rows.filter(r=>r.type==='item').length;
+      const hasData=rows.some(r=>NUMCOLS.some(k=>r[k]!=null))||items>0;
+      if (!rows.length || !hasData){
+        set3('Lettura da foto non riuscita: l\'immagine è poco leggibile. Per un risultato certo usa il PDF, oppure una scansione piana e dritta (app scanner).', 'err');
+        return;
+      }
+      xlsxBytes=await makeXlsx(rows); xlsxName='computo.xlsx';
+      dl3.textContent='Scarica Excel (.xlsx)';
+      prog3(1);
+      set3(`✓ Estratte ${items} voci, ${rows.length} righe — lettura da foto, da verificare a mano. Per risultati certi usa il PDF.`, 'done');
+      dl3.style.display='block';
     }
-  } catch(err){ console.error(err); set3('Errore in lettura: '+err.message, 'err'); return; }
-
-  set3('Ricostruzione tabella…'); prog3(0.9);
-  const rows = buildRows(lines);
-  const items = rows.filter(r=>r.type==='item').length;
-  const hasData = rows.some(r => NUMCOLS.some(k=>r[k]!=null)) || items>0;
-  if (!rows.length || !hasData){
-    set3(srcImages
-      ? 'Lettura da foto non riuscita: l\'immagine è poco leggibile. Per un risultato certo usa il PDF, oppure una scansione piana e dritta (app scanner).'
-      : 'Non sono riuscito a riconoscere la tabella del computo. Prova col PDF.', 'err');
-    return;
-  }
-
-  xlsxBytes = await makeXlsx(rows);
-  prog3(1);
-  if (srcImages)
-    set3(`✓ Estratte ${items} voci, ${rows.length} righe — lettura da foto, da verificare a mano. Per risultati certi usa il PDF.`, 'done');
-  else
-    set3(`✓ Fatto! ${items} voci di lavoro, ${rows.length} righe.`, 'done');
-  dl3.style.display='block';
+  } catch(err){ console.error(err); set3('Errore: '+err.message, 'err'); }
 }
 
 async function makeXlsx(rows){
@@ -777,7 +812,10 @@ async function makeXlsx(rows){
 }
 function brd(){ const s={style:'thin',color:{argb:'FFB7C4D4'}}; return {top:s,left:s,right:s,bottom:s}; }
 
-dl3.addEventListener('click', () => download(xlsxBytes, xlsxName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
+dl3.addEventListener('click', () => {
+  if (xlsxZip) download(xlsxZip, 'computi_excel.zip', 'application/zip');
+  else download(xlsxBytes, xlsxName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+});
 
 /* ---------- download comune ---------- */
 function download(bytes, name, mime){
