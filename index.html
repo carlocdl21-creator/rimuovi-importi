@@ -394,21 +394,67 @@ function lastIndexOfBytes(buf, pat){
 const SIG_PDF = [0x25,0x50,0x44,0x46,0x2D];   // %PDF-
 const SIG_EOF = [0x25,0x25,0x45,0x4F,0x46];   // %%EOF
 
+// --- Parser CMS/PKCS#7 (ASN.1 BER) ---------------------------------------
+// I p7m firmati (es. SINTEL/CAdES) usano BER a lunghezza indefinita: il PDF è
+// spezzato in segmenti OCTET STRING con intestazioni di lunghezza intercalate.
+// Un semplice "ritaglio" %PDF…%%EOF includerebbe quelle intestazioni e
+// romperebbe il PDF: bisogna riassemblare i segmenti correttamente.
+function _tlv(buf, p){
+  if (p+1 >= buf.length) throw 0;
+  const tag = buf[p]; const constructed = (tag & 0x20) !== 0; let i = p+1; let lb = buf[i++];
+  if (lb === 0x80){                       // lunghezza indefinita
+    let q = i;
+    while (q+1 < buf.length && !(buf[q]===0 && buf[q+1]===0)){ const c=_tlv(buf,q); if(c.next<=q) throw 0; q=c.next; }
+    if (q+1 >= buf.length) throw 0;
+    return {tag, constructed, valStart:i, valEnd:q, next:q+2};
+  } else if (lb & 0x80){                   // lunghezza lunga
+    let n = lb & 0x7f, len = 0; if (n>4) throw 0; while (n-->0) len = len*256 + buf[i++];
+    return {tag, constructed, valStart:i, valEnd:i+len, next:i+len};
+  }
+  return {tag, constructed, valStart:i, valEnd:i+lb, next:i+lb};   // lunghezza corta
+}
+function _reassembleOctet(buf, node){
+  if (!node.constructed) return buf.subarray(node.valStart, node.valEnd);
+  const parts=[]; let p=node.valStart;
+  while (p < node.valEnd){ const c=_tlv(buf,p); if((c.tag&0x1f)===0x04) parts.push(_reassembleOctet(buf,c)); p=c.next; }
+  let tot=0; for(const a of parts) tot+=a.length;
+  const out=new Uint8Array(tot); let o=0; for(const a of parts){ out.set(a,o); o+=a.length; } return out;
+}
+function extractPdfFromCMS(buf){
+  let best=null;
+  (function walk(p, end){
+    while (p < end-1){
+      if (buf[p]===0 && buf[p+1]===0){ p+=2; continue; }
+      let node; try { node=_tlv(buf,p); } catch(e){ return; }
+      if (node.valEnd>end || node.valStart>node.valEnd) return;
+      if ((node.tag&0x1f)===0x04){            // OCTET STRING → contenuto firmato?
+        const data=_reassembleOctet(buf,node);
+        if (data.length>4 && data[0]===0x25&&data[1]===0x50&&data[2]===0x44&&data[3]===0x46){ // %PDF
+          if (!best || data.length>best.length) best=data;
+        }
+      } else if (node.constructed){ walk(node.valStart, node.valEnd); }
+      p=node.next;
+    }
+  })(0, buf.length);
+  return best;
+}
+
 // estrae i byte del PDF dall'involucro PKCS#7/CAdES
 function extractPdf(uint8){
-  let start = indexOfBytes(uint8, SIG_PDF);
-  if (start < 0){
-    // forse il p7m è in Base64/PEM: prova a decodificare
+  // 1) parser CMS vero (riassembla i segmenti BER) — gestisce le firme SINTEL/CAdES
+  try { const cms = extractPdfFromCMS(uint8); if (cms && cms.length>100) return cms; } catch(e){}
+  // 2) eventuale p7m in Base64/PEM → decodifica e riprova col parser CMS
+  if (indexOfBytes(uint8, SIG_PDF) < 0){
     try {
-      let txt = new TextDecoder('latin1').decode(uint8)
-                  .replace(/-----[^-]*-----/g,'').replace(/[^A-Za-z0-9+/=]/g,'');
-      let bin = atob(txt);
-      let arr = new Uint8Array(bin.length);
+      let txt = new TextDecoder('latin1').decode(uint8).replace(/-----[^-]*-----/g,'').replace(/[^A-Za-z0-9+/=]/g,'');
+      let bin = atob(txt); let arr = new Uint8Array(bin.length);
       for (let k=0;k<bin.length;k++) arr[k] = bin.charCodeAt(k);
+      try { const cms = extractPdfFromCMS(arr); if (cms && cms.length>100) return cms; } catch(e){}
       uint8 = arr;
-      start = indexOfBytes(uint8, SIG_PDF);
     } catch(e){}
   }
+  // 3) fallback: ritaglio %PDF-…%%EOF (p7m "semplici" / contigui)
+  let start = indexOfBytes(uint8, SIG_PDF);
   if (start < 0) return null;
   let end = lastIndexOfBytes(uint8, SIG_EOF);
   if (end < 0) end = uint8.length - SIG_EOF.length;
