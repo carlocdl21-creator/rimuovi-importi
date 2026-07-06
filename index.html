@@ -421,7 +421,9 @@ function _reassembleOctet(buf, node){
   let tot=0; for(const a of parts) tot+=a.length;
   const out=new Uint8Array(tot); let o=0; for(const a of parts){ out.set(a,o); o+=a.length; } return out;
 }
-function extractPdfFromCMS(buf){
+function extractPdfFromCMS(buf, depth){
+  depth = depth || 0;
+  if (depth > 6) return null;              // limite firme annidate (doppia/tripla…)
   let best=null;
   (function walk(p, end){
     while (p < end-1){
@@ -432,6 +434,9 @@ function extractPdfFromCMS(buf){
         const data=_reassembleOctet(buf,node);
         if (data.length>4 && data[0]===0x25&&data[1]===0x50&&data[2]===0x44&&data[3]===0x46){ // %PDF
           if (!best || data.length>best.length) best=data;
+        } else if (data.length>8 && data[0]===0x30){    // p7m ANNIDATO (doppia/tripla firma) → ricorsione
+          const inner = extractPdfFromCMS(data, depth+1);
+          if (inner && (!best || inner.length>best.length)) best=inner;
         }
       } else if (node.constructed){ walk(node.valStart, node.valEnd); }
       p=node.next;
