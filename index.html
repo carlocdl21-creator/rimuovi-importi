@@ -199,8 +199,8 @@
       <!-- ========== PANNELLO 1: RIMUOVI IMPORTI ========== -->
       <section class="panel active" id="panel-importi">
         <h2>Rimuovi Importi</h2>
-        <p class="sub">Carica un Computo Metrico Estimativo in PDF (formato PriMus/ACCA).
-           Cancella i valori della colonna <b>IMPORTI</b> (unitario e TOTALE) e ti restituisce
+        <p class="sub">Carica un Computo Metrico Estimativo in PDF (formato <b>PriMus/ACCA</b> o <b>STR/Comune</b>).
+           Cancella i valori delle colonne prezzo (unitario/TOTALE oppure PREZZO/IMPORTO) e ti restituisce
            lo stesso PDF, senza prezzi.</p>
 
         <div class="drop" id="drop1">
@@ -243,7 +243,7 @@
       <!-- ========== PANNELLO 3: COMPUTO IN XLSX ========== -->
       <section class="panel" id="panel-xlsx">
         <h2>Computo in XLSX</h2>
-        <p class="sub">Carica uno o più <b>PDF</b> del Computo Metrico (formato PriMus/ACCA) e li trasforma
+        <p class="sub">Carica uno o più <b>PDF</b> del Computo Metrico (formato <b>PriMus/ACCA</b> o <b>STR/Comune</b>) e li trasforma
            in fogli <b>Excel</b> riga per riga, con tutte le colonne. Con più PDF ottieni un <b>ZIP</b> con
            un Excel separato per ciascuno. Sono supportate anche le <b>immagini/foto</b> (OCR, sperimentale).
            La prima pagina (copertina) viene esclusa.</p>
@@ -335,13 +335,21 @@ async function handleImporti(file){
       const page = await pdfjsDoc.getPage(i);
       const H = page.getViewport({scale:1}).height;
       const items = (await page.getTextContent()).items;
-      const isTable = items.some(it => { const t=(it.str||'').trim(); return t==='TOTALE'||t==='unitario'; });
-      if (isTable){
+      // determina il formato e da quale x tagliare i prezzi
+      let colLeft = null;
+      if (items.some(it => { const t=(it.str||'').trim(); return t==='TOTALE'||t==='unitario'; }))
+        colLeft = COL_LEFT;                                   // PriMus/ACCA → colonna IMPORTI a x≥494
+      else {
+        const pz = items.find(it => /^prezzo$/i.test((it.str||'').trim()));
+        const im = items.find(it => /^importo$/i.test((it.str||'').trim()));
+        if (pz && im) colLeft = pz.transform[4] - 8;          // STR/Comune → taglia da PREZZO (tiene QUANTITA')
+      }
+      if (colLeft!=null){
         const out = pages[i-1];
         for (const it of items){
           const t = it.str||''; if (!hasDigit.test(t)) continue;
           const x = it.transform[4], yBase = it.transform[5], w = it.width, h = it.height||9;
-          if (x>=COL_LEFT && (H-(yBase+h))>=TOP_MARGIN){
+          if (x>=colLeft && (H-(yBase+h))>=TOP_MARGIN){
             out.drawRectangle({x:x-1.5, y:yBase-2.5, width:w+3, height:h+5, color:white});
             tot++;
           }
@@ -558,7 +566,7 @@ function parseNum(s){
   const n = parseFloat(s);
   return isNaN(n) ? null : n;
 }
-const SKIP_DES = /^(riporto|a\s*riportare|dimensioni|importi|designazione( dei lavori)?|num\.?\s*ord\.?|tariffa|pag\b.*|primus.*|par\.ug.*|lung\.?|larg\.?|h\/?peso|quantit.*|unitario|totale)$/i;
+const SKIP_DES = /^(riporto|a\s*riportare|dimensioni|importi?|designazione( dei lavori)?|indicazione.*|num\.?\s*ord\.?|n\.|articolo|tariffa|pag\b.*|primus.*|par\.ug.*|lung\.?|larg\.?|h\/?peso|quantit.*|unitario|prezzo|totale|comune di.*|settore.*|computo metrico.*|edilizia.*|adeg\..*|llpp.*)$/i;
 
 // individua i centri-colonna dall'intestazione (cerca i sotto-titoli)
 function detectCols(items, H){
@@ -577,6 +585,22 @@ function detectCols(items, H){
   const map = xref => anchorImg + (xref-anchorRef)*span;
   const cc = {}; NUMCOLS.forEach(k => cc[k] = c[k]!=null ? c[k] : map(REF[k]));
   return { c:cc, numMax:map(REF.numMax), numericLeft:map(REF.desEnd) };
+}
+
+// Rilevatore per il formato STR / Comune (colonne: N.·ARTICOLO · INDICAZIONE · QUANTITA' · PREZZO · IMPORTO)
+// Mappa QUANTITA'→quant, PREZZO→unitario, IMPORTO→TOTALE; niente dimensioni.
+function detectColsSTR(items, H){
+  const top = items.filter(it => it.y < H*0.34);
+  const C = it => it.x + it.w/2;
+  const f = re => { const m = top.filter(it => re.test((it.s||'').toLowerCase().replace(/[\s']/g,''))); return m.length ? C(m.sort((a,b)=>a.y-b.y)[0]) : null; };
+  const quant=f(/^quantita/), prezzo=f(/^prezzo/), importo=f(/^importo/);
+  if (quant==null || importo==null) return null;      // non è questo formato
+  const scale = quant/419;                            // riferimento: QUANTITA' a x≈419 (PDF 595pt)
+  return {
+    c:{ parug:-9999, lung:-9998, larg:-9997, hpeso:-9996,
+        quant, unit:(prezzo!=null?prezzo:quant+57*scale), tot:importo },
+    numMax: 95*scale, numericLeft: 388*scale
+  };
 }
 
 function assign(it, M){
@@ -659,7 +683,7 @@ async function linesFromPdf(buf, skipFirst, prog){
       .filter(it => it.str && it.str.trim())
       .map(it => ({ s:it.str, x:it.transform[4], y:H-it.transform[5], w:it.width, h:it.height||8 }))
       .filter(it => it.y > 30 && it.y < H-26);   // togli numero pagina e footer
-    const dm = detectCols(items, H); if (dm) M=dm;
+    const dm = detectCols(items, H) || detectColsSTR(items, H); if (dm) M=dm;   // PriMus/ACCA oppure STR/Comune
     if (!M){ prog(i/n*0.8); continue; }
     for (const ln of groupLines(items)) all.push(lineToCells(ln, M));
     prog(i/n*0.8);
