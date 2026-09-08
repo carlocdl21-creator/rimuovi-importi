@@ -647,11 +647,14 @@ function buildRows(allLines){
     const desL = des.toLowerCase();
     const desNoSp = desL.replace(/\s+/g,'');
     const numOrd = L.numOrd.trim();
+    const dateLike = /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(numOrd);   // es. 02/08/2026 → NON è un n° voce
     const lead = numOrd.match(/^(\d+)/);
-    const leadN = lead ? parseInt(lead[1],10) : null;
+    const leadN = (lead && !dateLike) ? parseInt(lead[1],10) : null;
     // una nuova VOCE inizia solo se il numero d'ordine segue la sequenza (1,2,3,...)
     const itemStart = leadN!=null && leadN===nextNum;
-    // scarta intestazioni/segnaposto ripetuti (RIPORTO, DIMENSIONI, header colonne, pag., ...)
+    // scarta SEMPRE le righe RIPORTO / A RIPORTARE (ripetute a ogni pagina, inutili nell'Excel)
+    if (!itemStart && (/^riporto/.test(desNoSp) || /^ariportare/.test(desNoSp))) continue;
+    // scarta intestazioni/segnaposto ripetuti (DIMENSIONI, header colonne, pag., ...)
     if (!itemStart && (SKIP_DES.test(desNoSp) || SKIP_DES.test(desL))) continue;
     if (!itemStart && !hasNum && !des) continue;
     const isTariffa = !itemStart && /[A-Za-z]/.test(numOrd) && /\d/.test(numOrd) && numOrd.length<16;
