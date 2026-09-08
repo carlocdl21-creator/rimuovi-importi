@@ -575,13 +575,18 @@ function detectCols(items, H){
   const f = re => { const m = top.filter(it => re.test(it.s.toLowerCase().replace(/\s+/g,''))); return m.length ? C(m.sort((a,b)=>a.y-b.y)[0]) : null; };
   const c = { parug:f(/^par\.?ug/), lung:f(/^lung\.?$/), larg:f(/^larg\.?$/),
               hpeso:f(/h?\/?peso/), quant:f(/^quantit/), unit:f(/^unitario$/), tot:f(/^totale$/) };
-  if (Object.values(c).filter(v=>v!=null).length < 4) return null;
+  // basta Quantità + almeno una colonna prezzo (unitario o TOTALE): alcuni computi
+  // PriMus non hanno le colonne DIMENSIONI (par.ug/lung/larg/H-peso)
+  const nDim = [c.parug,c.lung,c.larg,c.hpeso].filter(v=>v!=null).length;
+  if (c.quant==null || (c.unit==null && c.tot==null)) return null;
+  if (nDim===0 && c.unit==null && c.tot==null) return null;
   // scala rispetto al riferimento (anchor su quant)
   const anchorImg = c.quant!=null ? c.quant : c.parug;
   const anchorRef = c.quant!=null ? REF.quant : REF.parug;
   let span=1;
   if (c.parug!=null && c.tot!=null) span = (c.tot-c.parug)/(REF.tot-REF.parug);
   else if (c.parug!=null && c.quant!=null) span = (c.quant-c.parug)/(REF.quant-REF.parug);
+  else if (c.quant!=null && c.tot!=null) span = (c.tot-c.quant)/(REF.tot-REF.quant);   // senza dimensioni: scala su quant→tot
   const map = xref => anchorImg + (xref-anchorRef)*span;
   const cc = {}; NUMCOLS.forEach(k => cc[k] = c[k]!=null ? c[k] : map(REF[k]));
   return { c:cc, numMax:map(REF.numMax), numericLeft:map(REF.desEnd) };
