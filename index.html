@@ -589,7 +589,14 @@ function detectCols(items, H){
   else if (c.quant!=null && c.tot!=null) span = (c.tot-c.quant)/(REF.tot-REF.quant);   // senza dimensioni: scala su quant→tot
   const map = xref => anchorImg + (xref-anchorRef)*span;
   const cc = {}; NUMCOLS.forEach(k => cc[k] = c[k]!=null ? c[k] : map(REF[k]));
-  return { c:cc, numMax:map(REF.numMax), numericLeft:map(REF.desEnd) };
+  let numericLeft = map(REF.desEnd);
+  if (nDim===0){
+    // computo SENZA colonne DIMENSIONI: la descrizione (ed etichette come "SOMMANO")
+    // arriva fin quasi a Quantità; nessuna colonna dimensione reale
+    cc.parug=-9999; cc.lung=-9998; cc.larg=-9997; cc.hpeso=-9996;
+    numericLeft = cc.quant - 15;
+  }
+  return { c:cc, numMax:map(REF.numMax), numericLeft };
 }
 
 // Rilevatore per il formato STR / Comune (colonne: N.·ARTICOLO · INDICAZIONE · QUANTITA' · PREZZO · IMPORTO)
@@ -657,6 +664,9 @@ function buildRows(allLines){
     // scarta intestazioni/segnaposto ripetuti (DIMENSIONI, header colonne, pag., ...)
     if (!itemStart && (SKIP_DES.test(desNoSp) || SKIP_DES.test(desL))) continue;
     if (!itemStart && !hasNum && !des) continue;
+    // scarta il VALORE di riporto orfano: riga senza descrizione con solo il TOTALE
+    // (il totale di RIPORTO/A RIPORTARE che nel PDF sta su una riga a parte, altra colonna)
+    if (!itemStart && !des && L.tot!=null && L.quant==null && L.unit==null) continue;
     const isTariffa = !itemStart && /[A-Za-z]/.test(numOrd) && /\d/.test(numOrd) && numOrd.length<16;
     const isSommano = /^sommano/i.test(desL);
     const isParziale = /^(parziale|t\s*o\s*t\s*a\s*l\s*e)\b/i.test(desL);
